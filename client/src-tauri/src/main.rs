@@ -67,6 +67,10 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
 
     TrayIconBuilder::new()
+        .icon(
+            tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
+                .expect("tray icon"),
+        )
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "quit" => app.exit(0),
