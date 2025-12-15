@@ -133,6 +133,11 @@ async fn handle_start(state: &Arc<app_state::AppState>) {
     let sample_rate = recorder.sample_rate;
     *guard = Some(recorder);
 
+    println!(
+        "start: sample_rate={} app_name='{}' window_title='{}'",
+        sample_rate, context.app_name, context.window_title
+    );
+
     let _ = state
         .tx
         .send(NetworkCommand::SendControl(ClientControl::Start {
@@ -148,6 +153,8 @@ async fn handle_stop(state: &Arc<app_state::AppState>) {
     if let Some(recorder) = recorder {
         recorder.stop();
     }
+
+    println!("stop");
 
     let _ = state
         .tx
