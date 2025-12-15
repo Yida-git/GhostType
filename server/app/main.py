@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -25,12 +26,16 @@ async def startup() -> None:
     if MODEL_PATH.exists():
         try:
             asr_engine = SenseVoiceEngine(MODEL_PATH)
-            print(f"ASR engine loaded: {MODEL_PATH}")
+            providers = getattr(asr_engine, "providers", None)
+            if providers:
+                print(f"ASR engine loaded: {MODEL_PATH} providers={providers}", flush=True)
+            else:
+                print(f"ASR engine loaded: {MODEL_PATH}", flush=True)
         except Exception as exc:
             asr_engine = StubAsrEngine()
-            print(f"WARNING: failed to load ASR model ({exc}); using stub")
+            print(f"WARNING: failed to load ASR model ({exc}); using stub", flush=True)
     else:
-        print(f"WARNING: ASR model not found at {MODEL_PATH}, using stub")
+        print(f"WARNING: ASR model not found at {MODEL_PATH}, using stub", flush=True)
 
 
 @dataclass
@@ -72,11 +77,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 return
 
             try:
+                t0 = time.perf_counter()
                 pcm = await asyncio.to_thread(
                     decode_opus_packets_to_pcm_s16le,
                     state.opus_packets,
                     input_sample_rate=state.sample_rate,
                 )
+                t1 = time.perf_counter()
                 if os.environ.get("GHOSTTYPE_DUMP_WAV"):
                     dump_dir = Path(
                         os.environ.get("GHOSTTYPE_DUMP_WAV_DIR") or tempfile.gettempdir()
@@ -90,13 +97,24 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         sample_rate=pcm.sample_rate,
                         channels=pcm.channels,
                     )
-                    print(f"dumped wav: {dump_path}")
+                    print(f"dumped wav: {dump_path}", flush=True)
 
                 try:
+                    t_asr0 = time.perf_counter()
                     text = await asr_engine.transcribe(pcm.pcm_s16le, pcm.sample_rate)
+                    t_asr1 = time.perf_counter()
                 except Exception as exc:
                     await _send_error(ws, f"asr failed: {exc}")
                     text = f"[asr_error: {exc}]"
+
+                if os.environ.get("GHOSTTYPE_LOG_TIMINGS"):
+                    decode_ms = (t1 - t0) * 1000.0
+                    asr_ms = (t_asr1 - t_asr0) * 1000.0
+                    total_ms = (t_asr1 - t0) * 1000.0
+                    print(
+                        f"timings: decode={decode_ms:.0f}ms asr={asr_ms:.0f}ms total={total_ms:.0f}ms pcm_bytes={len(pcm.pcm_s16le)} sr={pcm.sample_rate}",
+                        flush=True,
+                    )
 
                 await ws.send_text(
                     _json_dumps({"type": "fast_text", "content": text, "is_final": True})
@@ -144,3 +162,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     except WebSocketDisconnect:
         return
+    except RuntimeError as exc:
+        # Starlette raises a RuntimeError when `receive()` is called after a disconnect
+        # message has already been processed.
+        if 'disconnect message has been received' in str(exc):
+            return
+        raise

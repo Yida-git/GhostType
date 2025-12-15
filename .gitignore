@@ -13,6 +13,9 @@ venv/
 *.gguf
 *.bin
 *.pt
+server/models/*
+!server/models/.gitkeep
+!server/models/README.md
 
 # OS
 .DS_Store
@@ -21,4 +24,3 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-
