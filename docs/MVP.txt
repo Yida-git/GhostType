@@ -1,0 +1,144 @@
+# GitHub 仓库架构。
+
+太棒了。既然要在 2-3 天内写完 MVP (最小可行性产品)，我们必须极其功利。不要做花哨的 GUI，不要做复杂的用户系统，一切为了**“按下 CapsLock -> 说话 -> 屏幕上出现完美文字”**这一个核心闭环。
+这是你的 GhostType MVP 战术手册。
+一、 MVP 核心架构 (The Lean Architecture)
+MVP 砍掉了一切细枝末节（比如安卓端、复杂设置页、云端 API 计费），只保留**“私有化极速体验”**。
+[ GhostType MVP Scope ]
+
+CLIENT (Mac/Win)                     SERVER (Win 5070Ti)
++-----------------------+            +-------------------------+
+| Rust (Tauri Tray)     |            | Python (FastAPI)        |
++-----------------------+            +-------------------------+
+| 1. Hotkey Monitor     |            | 1. WS Receiver          |
+|    (rdev: CapsLock)   | --(Opus)-->|    (Decode -> Queue)    |
+|                       |            |                         |
+| 2. Audio Capture      |            | 2. ASR Engine (Track A) |
+|    (cpal -> RingBuf)  |            |    (SenseVoice ONNX)    |
+|                       | <--Text----|    -> Fast Return       |
+| 3. Action Executor    |            |                         |
+|    (enigo: Type/Del)  |            | 3. LLM Agent (Track B)  |
+|                       | <--Cmd-----|    (Ollama Qwen2.5)     |
+| 4. Feedback           |            |    -> Diff & Correct    |
+|    (Tray Icon Color)  |            +-------------------------+
++-----------------------+
+
+二、 GitHub 仓库结构 (Monorepo)
+这是你 git init 后应该立刻建立的结构。为了 3 天搞定，我帮你简化了目录。
+GhostType/
+├── .gitignore               # 忽略 target/, venv/, models/, __pycache__
+├── README.md                # 现在的草稿，后面放演示 GIF
+├── LICENSE                  # MIT
+├── assets/                  # 放 logo.png (用于托盘图标)
+│
+├── client/                  # [Rust Client]
+│   ├── src-tauri/
+│   │   ├── src/
+│   │   │   ├── main.rs      # 主入口 (Tray, Setup)
+│   │   │   ├── app_state.rs # 共享状态 (WebSocket连接, 录音状态)
+│   │   │   ├── audio.rs     # 录音 + Opus 编码
+│   │   │   ├── network.rs   # WebSocket 发送/接收循环
+│   │   │   └── input.rs     # 键盘监听 (Hook) + 模拟输入 (Simulate)
+│   │   ├── tauri.conf.json  # 权限配置 (很重要)
+│   │   └── Cargo.toml       # 依赖列表
+│   └── package.json         # 只要最基础的配置
+│
+└── server/                  # [Python Server]
+    ├── models/              # 放 sensevoice.onnx (手动下载)
+    ├── config.py            # 配置: IP, 端口, Ollama地址
+    ├── main.py              # FastAPI 启动 + WebSocket 路由
+    ├── engine.py            # 核心类: ASR推理 + Ollama调用逻辑
+    └── requirements.txt     # fastapi, uvicorn, websockets, onnxruntime-gpu
+
+三、 MVP 核心功能清单 (Must-Haves)
+这 3 天内，你只做这 5 件事。少一件都不是 MVP，多一件都是浪费。
+1. 极其稳定的连接 (The Connection)
+ * 需求： 客户端启动能自动连服务端。如果断连（比如合盖睡眠后唤醒），必须能自动重连。
+ * 表现： 托盘图标：灰色(断开) -> 绿色(就绪)。
+2. CapsLock 状态机 (The Trigger)
+ * 逻辑：
+   * 按下 CapsLock -> 托盘变红色 -> 开始推流。
+   * 松开 CapsLock -> 托盘变黄色 (处理中) -> 发送 {"signal": "stop"}。
+   * 再次按下 -> 强制中断当前操作（Panic Button）。
+ * 坑点： 必须屏蔽 CapsLock 原本的大小写切换功能（rdev 拦截事件），只有“短按”（<0.3s）才放行原功能。
+3. 双轨制输出 (The Dual-Track)
+ * 轨道 A (STT): 延迟 < 500ms。服务端识别出字，立刻发回 {"type": "text", "val": "..."}。客户端直接打字上屏。
+ * 轨道 B (LLM): 延迟 < 2s。服务端 LLM 对比原文，发现有改动，发回 {"type": "fix", "del": 5, "val": "..."}。客户端模拟 Backspace * 5 然后打入新字。
+4. 基础音频压缩 (The Compression)
+ * 需求： 必须上 Opus。
+ * 原因： 如果你传 PCM，稍微有点网络波动就会卡顿吞字。
+ * 实现： Rust 端用 audiopus 把 480 字节的 PCM 压成 40 字节发走。
+5. 极简配置 (The Config)
+ * 不要做 UI 设置页。
+ * 实现： 客户端读取同目录下的 config.json (填服务端 IP)。
+四、 3天开发冲刺计划 (Action Plan)
+这是你的冲刺时间表。
+Day 1: 基础设施与“Hello Socket”
+ * 上午 (Server):
+   * Python 跑通 FastAPI WebSocket。
+   * 跑通 Ollama API 调用（写个脚本测试 Qwen 2.5 改写句子）。
+   * 跑通 SenseVoice ONNX 推理（输入 wav 文件，输出文字）。
+ * 下午 (Client):
+   * Rust 跑通 rdev 监听 CapsLock。
+   * Rust 跑通 tungstenite 连接 Python WebSocket。
+   * 里程碑 1: 按下 CapsLock，Client 发送 "Ping"，Server 打印 "Pong"。
+Day 2: 核心链路打通
+ * 上午 (Audio):
+   * 引入 cpal。把麦克风数据流读进 buffer。
+   * 引入 audiopus。编码 -> 发送。
+   * 服务端接收 -> 解码 -> 存成 .wav 听一下是不是人声（这一步很关键，排除噪音/采样率问题）。
+ * 下午 (ASR + Typing):
+   * 服务端接上 ASR 模型。
+   * 客户端接上 enigo。
+   * 里程碑 2: 按住说话，松开后屏幕上自动打出（没润色的）文字。
+Day 3: 注入灵魂 (LLM + 优化)
+ * 上午 (LLM Integration):
+   * 服务端加上 Ollama 处理逻辑。
+   * 实现“回退修正”协议：计算编辑距离，计算需要按多少次退格键。
+ * 下午 (Feedback & Stability):
+   * 加上托盘图标变色逻辑。
+   * 测试断网重连。
+   * 里程碑 3 (MVP Completed): 完整的 GhostType 体验。
+五、 关键代码片段 (Cheat Sheet)
+为了帮你省时间，我把最难啃的骨头（Rust 录音+发送）给你写个伪代码架构。
+Client: audio.rs (概念代码)
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use audiopus::{coder::Encoder, Application, Channels, SampleRate};
+
+pub fn start_mic(tx: Sender<Vec<u8>>) -> Stream {
+    let host = cpal::default_host();
+    let device = host.default_input_device().expect("No mic found");
+    let config = device.default_input_config().unwrap();
+
+    // 初始化 Opus 编码器 (48kHz, 单声道)
+    let mut encoder = Encoder::new(
+        SampleRate::Hz48000, 
+        Channels::Mono, 
+        Application::Voip
+    ).unwrap();
+
+    let stream = device.build_input_stream(
+        &config.into(),
+        move |data: &[f32], _: &_| {
+            // 1. float32 -> int16 (PCM)
+            let pcm: Vec<i16> = data.iter().map(|&x| (x * 32767.0) as i16).collect();
+            
+            // 2. Opus Encode
+            let mut output = [0u8; 256]; 
+            let len = encoder.encode(&pcm, &mut output).unwrap();
+            
+            // 3. Send via Channel (to Network thread)
+            tx.send(output[..len].to_vec()).unwrap();
+        },
+        err_fn,
+        None
+    ).unwrap();
+    
+    stream.play().unwrap();
+    stream
+}
+
+六、 总结
+这 3 天你不需要考虑 SEO，不需要考虑文档。
+你的目标只有一个：在第 3 天晚上，关掉所有开发工具，用你刚写好的 GhostType，在 GitHub 上敲下第一行 README。
+那个时刻，才是你独立黑客生涯的真正开始。现在，开干！

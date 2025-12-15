@@ -1,0 +1,184 @@
+# MVP
+
+这是一个非常关键的起步阶段。一个清晰、专业的 GitHub 仓库结构不仅能让你开发顺手，更是**“骗星星”的第一张门面**。别人点进来，看到结构混乱的代码，直接劝退；看到结构清晰、文档规范的仓库，第一印象就是“这项目靠谱”。
+由于我们在 Windows 上开发，且采用 Monorepo (单体仓库) 策略（即 Client 和 Server 都在一个仓库里，方便管理版本），我为你设计了以下架构。
+1. 仓库命名建议
+名字要短，要酷，要好记。
+ * Repo Name: GhostType (或者 GhostType-Open)
+ * Slogan: The AI-powered voice input for hackers. Privacy-first, Local LLM, Cross-platform.
+2. 推荐的文件/目录架构 (Directory Structure)
+这是一个符合工业级标准的开源项目结构。
+GhostType/
+├── .github/                 # GitHub Actions (自动构建 release), Issue 模板
+│   ├── workflows/
+│   │   └── release.yml      # 未来用来自动打包 .exe/.dmg
+│   └── ISSUE_TEMPLATE/
+├── assets/                  # 存放 Readme 用的截图、Logo、演示 GIF
+├── client/                  # [Rust + Tauri] 客户端代码 ("The Hand")
+│   ├── src-tauri/           # Rust 后端核心
+│   │   ├── src/
+│   │   │   ├── main.rs      # 入口：托盘、菜单逻辑
+│   │   │   ├── audio.rs     # 录音 + Opus 编码逻辑 (cpal + audiopus)
+│   │   │   ├── network.rs   # WebSocket 通信逻辑 (tungstenite)
+│   │   │   └── input.rs     # 键盘模拟 + 监听逻辑 (rdev + enigo)
+│   │   ├── tauri.conf.json  # Tauri 配置文件 (权限、打包设置)
+│   │   └── Cargo.toml       # Rust 依赖定义
+│   ├── src/                 # 前端 UI (极其简单，可能就一个设置页)
+│   │   ├── index.html
+│   │   └── main.js
+│   └── package.json         # Tauri 构建依赖
+├── server/                  # [Python] 服务端代码 ("The Brain")
+│   ├── app/                 # 核心代码包
+│   │   ├── __init__.py
+│   │   ├── main.py          # FastAPI 入口
+│   │   ├── core/            # 核心业务逻辑
+│   │   │   ├── asr.py       # 语音识别 (SenseVoice ONNX)
+│   │   │   ├── llm.py       # 大模型接口 (Ollama Call)
+│   │   │   └── vad.py       # (可选) 服务端 VAD 二次校验
+│   │   └── utils/
+│   │       └── audio.py     # Opus 解码 -> PCM 重采样
+│   ├── models/              # [空目录] 存放 .onnx/.gguf (需 gitignore!)
+│   ├── config.yaml          # 配置文件 (模型路径、端口、Prompt)
+│   ├── requirements.txt     # 依赖包 (fastapi, onnxruntime, etc.)
+│   └── run.bat              # Windows 一键启动脚本
+├── docs/                    # 文档目录
+│   ├── protocol.md          # 我们定义的 WebSocket 通信协议文档
+│   └── architecture.md      # 架构图 (把刚才我画的 ASCII 存进去)
+├── .gitignore               # 极其重要！防止上传垃圾文件
+├── LICENSE                  # MIT License (开源标配)
+└── README.md                # 项目门面 (中英双语)
+
+3. Windows 开发环境初始化指南 (Quick Start)
+现在，在你的 Windows 开发机上，打开 PowerShell 或 Terminal，按照这个顺序操作，直接把骨架搭起来。
+第一步：初始化 Git 和 根目录
+# 1. 创建项目文件夹
+mkdir GhostType
+cd GhostType
+
+# 2. 初始化 Git
+git init
+
+# 3. 创建 .gitignore (这一步至关重要，防止你把 5GB 的模型传上去)
+# 我直接给你写好内容，复制进去
+new-item .gitignore -value "
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Rust / Tauri
+/client/src-tauri/target/
+/client/node_modules/
+
+# Models (绝对不能传!)
+*.onnx
+*.gguf
+*.bin
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+"
+
+第二步：初始化服务端 (Server)
+# 1. 进入 server 目录
+mkdir server
+cd server
+
+# 2. 创建 Python 虚拟环境 (推荐)
+python -m venv venv
+
+# 3. 激活环境
+.\venv\Scripts\Activate.ps1
+
+# 4. 创建基础文件结构
+mkdir app
+mkdir app\core
+mkdir app\utils
+mkdir models
+new-item config.yaml -value "server:
+  host: 0.0.0.0
+  port: 8000
+models:
+  asr: ./models/sensevoice.onnx
+  llm: qwen2.5:7b"
+new-item app\main.py -value "from fastapi import FastAPI
+app = FastAPI()
+@app.get('/')
+def read_root(): return {'status': 'GhostType Server Running'}"
+
+# 5. 回到根目录
+cd ..
+
+第三步：初始化客户端 (Client - Tauri)
+前提：你已经安装了 Rust 和 Node.js。
+# 1. 使用 create-tauri-app 脚手架
+npm create tauri-app@latest
+
+# 交互式选择：
+# ? Project name: client
+# ? Identifier: com.ghosttype.app
+# ? Choose which language to use for your frontend: HTML/CSS/JS (最简模式，不需要 React/Vue)
+# ? Choose your package manager: npm/pnpm/yarn (看你喜好)
+# ? Choose your UI template: Vanilla (原生 JS，越轻越好)
+# ? Choose your UI flavor: JavaScript
+
+# 2. 稍微清理一下
+# 脚手架会生成 client 文件夹，确保它在 GhostType 根目录下
+
+4. 关键文件配置建议 (The "Secret Sauce")
+A. Cargo.toml (Client 依赖)
+这是你 Rust 部分的灵魂。在 client/src-tauri/Cargo.toml 中，你需要把这些 crates 加上：
+[dependencies]
+tauri = { version = "2.0.0", features = ["tray-icon"] } # 托盘支持
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] } # 异步运行时
+tokio-tungstenite = "0.20"  # WebSocket 客户端
+cpal = "0.15"               # 音频采集 (The Ear)
+audiopus = "0.2"            # Opus 编码 (The Compressor)
+rdev = "0.5"                # 全局按键监听 (The Trigger)
+enigo = "0.1"               # 模拟键盘输入 (The Typist)
+active-win = "0.4"          # 获取当前窗口信息 (The Context)
+
+B. README.md (你的广告牌)
+在根目录下创建，内容结构如下：
+# 👻 GhostType
+
+> **Privacy-first AI Voice Input for Hackers.**
+> Runs locally on your GPU. No cloud required.
+
+## Features
+- 🚀 **Blazing Fast**: Client written in Rust (<10MB RAM).
+- 🧠 **Context Aware**: Knows if you are coding (VS Code) or chatting (WeChat).
+- 🔒 **Privacy First**: Audio never leaves your Server/Localhost.
+- 🔧 **Customizable**: Swap between Qwen, Llama, or DeepSeek models easily.
+
+## Architecture
+(这里把你刚才那个 ASCII 架构图粘贴进去，极客最爱看这个)
+
+## Quick Start
+### Client (Windows/Mac)
+1. `cd client`
+2. `npm install`
+3. `npm run tauri dev`
+
+### Server (Windows w/ GPU)
+1. `cd server`
+2. `pip install -r requirements.txt`
+3. `python -m app.main`
+
+5. 下一步做什么？
+现在的结构已经很完美了。
+ * 执行上面的命令，把文件夹建好。
+ * Commit 第一次代码：git add . -> git commit -m "feat: initial project structure"。
+ * 开始写代码：
+   * 我建议先写 client/src-tauri/src/main.rs，尝试把 rdev 跑通（按下 CapsLock 打印 "Down"）。
+   * 这就是你今天的 MVP (Minimum Viable Product)。
+准备好开始敲 mkdir GhostType 了吗？

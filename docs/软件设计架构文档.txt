@@ -1,0 +1,175 @@
+这是一个为你深度定制的 Project GhostType (幽灵输入) 最终版软件架构设计文档。
+这份文档将作为你开发的“施工图纸”。它融合了Rust 客户端的极致轻量、Python 服务端的强大生态，以及LLM 的智能修正，并特别针对你 32GB 内存服务器和 Mac 主力机的环境进行了优化。
+Project GhostType: 最终架构设计文档
+1. 系统宏观拓扑图 (System Topology)
+这是系统的全貌，展示了数据如何在你的设备之间流动。
+[ User Environment (Mac M3 Pro / Win Laptop) ]        [ Network Layer ]             [ Server Environment (5070 Ti / 32GB RAM) ]
++------------------------------------------+          +---------------+             +-----------------------------------------+
+| GhostType Client (Rust + Tauri v2)       |          |               |             | GhostType Server (Python FastAPI)       |
+|                                          |          |  Tailscale /  |             |                                         |
+| [Mic] --> [VAD] --> [Opus Encoder] --(Audio Stream)---> VPN / LAN   |             | [Websocket Receiver] --> [Opus Decoder] |
+|                                          |          |               |             |       |                                 |
+| [Keyboard Hook] <--(Simulate Keys)-------(Text Cmd)-------+         |             |       +--> [Track A: STT Engine]        |
+|       ^              (Backspace)         |          |     |         |             |       |    (SenseVoice ONNX)            |
+|       |                                  |          |     |         |             |       |             |                   |
+| [Active Window] --> [Context Tag] -------(Metadata)-------+         |             |       +--> [Track B: LLM Agent]         |
+| (VS Code / WeChat)                       |          |               |             |            (Ollama / Qwen 2.5)          |
++------------------------------------------+          +---------------+             +-----------------------------------------+
+                                                                                          ^
+                                                                                          |
+                                                                                [Optional: Cloud API Fallback]
+                                                                                (Aliyun / DeepSeek API)
+
+2. 客户端架构详解 (Client Architecture)
+目标：内存占用 < 20MB，无界面，极致响应。
+技术栈：Rust, Tauri v2 (无 Webview 模式), CPAL, RDEV, Tungstenite。
++-----------------------------------------------------------------------+
+|  Client Core (Rust Binary)                                            |
++-----------------------------------------------------------------------+
+|                                                                       |
+|  1. Input Layer (Sensors)                                             |
+|  +------------------+    +-------------------+    +----------------+  |
+|  | Global Hotkey    |    | Audio Capture     |    | Window Watcher |  |
+|  | (Crate: rdev)    |    | (Crate: cpal)     |    | (active-win)   |  |
+|  | -> Detect CapsLk |    | -> 48kHz Stream   |    | -> Get AppName |  |
+|  +--------+---------+    +---------+---------+    +--------+-------+  |
+|           |                        |                       |          |
+|           v                        v                       v          |
+|  2. Processing Layer (The Filter)                                     |
+|  +------------------+    +-------------------+                        |
+|  | State Machine    |--->| VAD & Compression |                        |
+|  | (Idle/Record)    |    | (webrtc-vad +     |                        |
+|  +------------------+    |  audiopus/Opus)   |                        |
+|           |              +---------+---------+                        |
+|           |                        |                                  |
+|           v                        v                                  |
+|  3. Network Layer (The Pipe)                                          |
+|  +---------------------------------------------------+                |
+|  | WebSocket Client (tokio-tungstenite)              |                |
+|  | -> Mode: Self-Hosted (Low Latency)                |                |
+|  | -> Mode: Cloud API (Fallback/Cost-saving)         |                |
+|  +--------+------------------------^-----------------+                |
+|           |                        |                                  |
+|           v                        |                                  |
+|  4. Output Layer (The Actor)       |                                  |
+|  +------------------+    +---------+---------+                        |
+|  | Text Injector    |    | Feedback UI       |                        |
+|  | (enigo/arboard)  |    | (Tray / Cursor)   |                        |
+|  | -> Paste/Type    |    | -> Red Dot Overlay|                        |
+|  | -> Backspace     |    +-------------------+                        |
+|  +------------------+                                                 |
++-----------------------------------------------------------------------+
+
+关键优化点：
+ * VAD (语音活动检测)：必须在客户端做。如果用户只按了 CapsLock 但没说话，绝不建立 WebSocket 连接，绝不浪费流量。
+ * Ring Buffer：在按下按键的瞬间，其实预读了过去 0.2 秒的音频（防止吞字首）。
+ * Context Tagging：发送音频前，附带当前窗口信息 JSON：{"app": "Code", "title": "main.rs"}。
+3. 服务端架构详解 (Server Architecture)
+目标：适应 32GB 内存，兼顾速度与智能。
+技术栈：Python 3.10+, FastAPI, ONNX Runtime, Ollama (GGUF).
++-----------------------------------------------------------------------+
+|  Server Pipeline (Python FastAPI)                                     |
++-----------------------------------------------------------------------+
+|                                                                       |
+|  [ WS Connection Handler ] <--- (Receive Audio Chunks)                |
+|           |                                                           |
+|           v                                                           |
+|  [ Opus Decoder ] (48k -> 16k Resampling)                             |
+|           |                                                           |
+|           v                                                           |
+|  [ Dual-Track Dispatcher ]                                            |
+|  |                                                                    |
+|  +---> TRACK A: Speed (ASR Only) ----------------------------------+  |
+|  |     [ SenseVoice-Small (ONNX Int8) ]                            |  |
+|  |     -> RAM Usage: ~400MB                                        |  |
+|  |     -> Output: "Raw Text" (High Speed, Low Accuracy)            |  |
+|  |     -> Action: Send "FAST_TEXT" Event                           |  |
+|  |                                                                 |  |
+|  +---> TRACK B: Intelligence (LLM Correction) ---------------------+  |
+|        [ Context Injector ] (Add System Prompt based on App Name)  |  |
+|        [ Ollama Bridge ] (HTTP Async Request)                      |  |
+|        -> Model: Qwen 2.5 7B (GGUF 4-bit Quant)                    |  |
+|        -> VRAM Usage: ~5.5GB                                       |  |
+|        -> Prompt: "Fix typos, remove spoken fluff, keep technical."|  |
+|        -> Action: Calculate Diff -> Send "CORRECTION" Event        |  |
+|                                                                    |  |
++-----------------------------------------------------------------------+
+
+关键优化点：
+ * SenseVoice ONNX：使用 Int8 量化版，极其节省 CPU/内存，不需要 PyTorch 笨重的环境。
+ * Prompt 动态注入：
+   * 如果 Client 传来的 app 是 IDE -> Prompt: "保留英文变量名，不要加中文句号"。
+   * 如果 Client 传来的 app 是 WeChat -> Prompt: "允许口语化，适当添加 Emoji"。
+4. 核心交互流程 (The "Double-Jump" Workflow)
+这是用户体验的核心：“先上屏，再修正”。
+Time (ms) | Client Action               | Server Action
+----------+-----------------------------+---------------------------------------
+T+0       | User: Press CapsLock        | (Idle)
+T+10      | Mic: Start Recording        | (Idle)
+T+300     | User: Speak "Hello World"   | (Receiving Stream...)
+T+500     | User: Release CapsLock      | ASR: SenseVoice finishes
+          |                             | -> Result: "哈喽沃德" (Raw)
+T+600     | RX: "哈喽沃德"              | Send JSON: {"type": "fast", "text": "哈喽沃德"}
+          | UI: Type "哈喽沃德"         | LLM: Qwen processing...
+          |                             | -> Context: VS Code
+          |                             | -> Prompt: "Fix to code style"
+T+1500    |                             | -> Result: "Hello World"
+          |                             | Send JSON: {"type": "fix", "old": "哈喽沃德", "new": "Hello World"}
+T+1600    | RX: Fix Instruction         |
+          | UI: Backspace x 4           |
+          | UI: Type "Hello World"      |
+
+5. 通信协议定义 (Data Protocol)
+为了确保 Client 和 Server 解耦，协议必须清晰。
+1. Client -> Server (Handshake/Metadata)
+{
+  "type": "start",
+  "sample_rate": 16000,
+  "context": {
+    "app_name": "Visual Studio Code",
+    "window_title": "ghost_type_main.rs"
+  },
+  "use_cloud_api": false  // 是否强制回退到云端 API
+}
+
+2. Client -> Server (Binary Stream)
+ * 纯 Opus 编码的二进制包 (无 JSON Overhead)。
+3. Server -> Client (Fast Response)
+{
+  "type": "fast_text",
+  "content": "测试文本",
+  "is_final": false
+}
+
+4. Server -> Client (Correction)
+{
+  "type": "correction",
+  "original_text": "测试文本",
+  "replaced_text": "测试文本。", // LLM 加上了标点
+  "delete_count": 4           // 客户端只需傻瓜式执行 Backspace 4 次
+}
+
+6. 安卓端特供方案 (Android Overlay Strategy)
+安卓端不重写输入法，做辅助功能挂件。
+[ Android System Layer ]
+       |
+       v
+[ GhostType Android Service (Java/Kotlin) ]
+|
++--> [ Floating Button (Overlay) ] (显示在所有 APP 之上)
+|       |
+|       +--> OnTouchDown: Record Audio (MediaRecorder -> Opus)
+|       +--> OnTouchUp: Send to Server (Same Protocol as PC)
+|
++--> [ Accessibility Service ]
+        |
+        +--> Receive "fast_text" -> Call pasteText() (插入文字)
+        +--> Receive "correction" -> Call setSelection() + cut/paste (替换文字)
+
+7. 你的“防坑”检查清单 (Checklist)
+在开始写代码前，请确认以下点：
+ * [ ] Server 显存保护：确保 Ollama 配置了 keep_alive，并且 5070 Ti 驱动是最新的。
+ * [ ] Mac 权限：Rust Client 必须在 Info.plist 声明麦克风权限，并且编译后在“隐私-辅助功能”里手动添加。
+ * [ ] Windows 兼容：Windows 的 rdev 监听有时会被反作弊软件（如 Valorant Vanguard）拦截，这是无解的，但在开发机上没问题。
+ * [ ] 弱网处理：客户端检测到 Ping > 300ms 时，自动禁用 LLM 修正功能，只返回 ASR 结果，保证基础体验。
+ * [ ] 音频归一化：Mac 麦克风录出来的音量可能很小，发送前建议在 Rust 里做一个简单的 Normalize (音量增益)。
