@@ -1,13 +1,20 @@
 {
-  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "GhostType",
   "version": "0.1.0",
-  "identifier": "com.ghosttype.app",
+  "identifier": "com.ghosttype.client",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   },
   "app": {
     "windows": [

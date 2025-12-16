@@ -8,7 +8,6 @@ use tokio_tungstenite::tungstenite::Message;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientControl {
-    Ping,
     Start {
         sample_rate: u32,
         context: ClientContext,
@@ -114,20 +113,21 @@ async fn handle_server_text(text: &str, injector: &Injector) {
 
     match event {
         ServerEvent::Pong => {}
-        ServerEvent::FastText { content, .. } => {
+        ServerEvent::FastText { content, is_final } => {
+            let _ = is_final;
             let _ = injector.tx.send(InjectCommand::TypeText(content)).await;
         }
         ServerEvent::Correction {
+            original_text,
             replaced_text,
             delete_count,
-            ..
         } => {
+            let _ = original_text;
             let _ = injector.tx.send(InjectCommand::Backspace(delete_count)).await;
             let _ = injector.tx.send(InjectCommand::TypeText(replaced_text)).await;
         }
         ServerEvent::Error { message } => {
-            eprintln!("server error: {message}");
+            log::error!("server error: {message}");
         }
     }
 }
-

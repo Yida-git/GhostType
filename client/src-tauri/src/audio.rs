@@ -1,20 +1,20 @@
 use anyhow::{anyhow, Context as _};
-use audiopus::{coder::Encoder, Application, Channels, SampleRate};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Sample, SampleFormat, Stream, StreamConfig};
+use cpal::{Device, FromSample, Sample, SampleFormat, Stream, StreamConfig};
 use std::sync::Arc;
 
 use crate::network::NetworkCommand;
+use crate::opus::OpusEncoder;
 
 pub struct AudioRecorder {
-    stream: Option<Stream>,
+    stop_tx: crossbeam_channel::Sender<()>,
     join: Option<std::thread::JoinHandle<()>>,
     pub sample_rate: u32,
 }
 
 impl AudioRecorder {
     pub fn stop(mut self) {
-        self.stream.take();
+        let _ = self.stop_tx.send(());
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
@@ -22,25 +22,38 @@ impl AudioRecorder {
 }
 
 pub fn start_audio(network_tx: tokio::sync::mpsc::Sender<NetworkCommand>) -> anyhow::Result<AudioRecorder> {
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or_else(|| anyhow!("no input device"))?;
-
-    let (config, sample_format, sample_rate) = pick_stream_config(&device)?;
-    let channels = config.channels as usize;
-
-    let (raw_tx, raw_rx) = crossbeam_channel::bounded::<Vec<f32>>(16);
-    let raw_tx = Arc::new(raw_tx);
-
-    let stream = build_input_stream(&device, &config, sample_format, channels, raw_tx.clone())?;
-    stream.play().context("start input stream")?;
+    let (stop_tx, stop_rx) = crossbeam_channel::bounded::<()>(1);
+    let (ready_tx, ready_rx) = crossbeam_channel::bounded::<anyhow::Result<u32>>(1);
 
     let join = std::thread::spawn(move || {
-        let mut encoder = match opus_encoder(sample_rate) {
-            Ok(enc) => enc,
+        let start_result =
+            (|| -> anyhow::Result<(Stream, crossbeam_channel::Receiver<Vec<f32>>, OpusEncoder, u32)> {
+            let host = cpal::default_host();
+            let device = host
+                .default_input_device()
+                .ok_or_else(|| anyhow!("no input device"))?;
+
+            let (config, sample_format, sample_rate) = pick_stream_config(&device)?;
+            let channels = config.channels as usize;
+
+            let (raw_tx, raw_rx) = crossbeam_channel::bounded::<Vec<f32>>(16);
+            let raw_tx = Arc::new(raw_tx);
+
+            let stream = build_input_stream(&device, &config, sample_format, channels, raw_tx)?;
+            stream.play().context("start input stream")?;
+
+            let encoder = OpusEncoder::new(sample_rate)?;
+
+            Ok((stream, raw_rx, encoder, sample_rate))
+        })();
+
+        let (stream, raw_rx, mut encoder, sample_rate) = match start_result {
+            Ok(parts) => {
+                let _ = ready_tx.send(Ok(parts.3));
+                parts
+            }
             Err(err) => {
-                eprintln!("opus encoder init failed: {err:#}");
+                let _ = ready_tx.send(Err(err));
                 return;
             }
         };
@@ -49,22 +62,32 @@ pub fn start_audio(network_tx: tokio::sync::mpsc::Sender<NetworkCommand>) -> any
         let mut pcm_buf: Vec<i16> = Vec::with_capacity(frame_size * 4);
         let mut out_buf = vec![0u8; 4096];
 
-        while let Ok(chunk) = raw_rx.recv() {
-            pcm_buf.extend(chunk.into_iter().map(f32_to_i16));
+        loop {
+            crossbeam_channel::select! {
+                recv(stop_rx) -> _ => break,
+                recv(raw_rx) -> msg => {
+                    let Ok(chunk) = msg else { break };
+                    pcm_buf.extend(chunk.into_iter().map(f32_to_i16));
 
-            while pcm_buf.len() >= frame_size {
-                let frame: Vec<i16> = pcm_buf.drain(..frame_size).collect();
-                let Ok(len) = encoder.encode(&frame, &mut out_buf) else {
-                    continue;
-                };
-                let packet = out_buf[..len].to_vec();
-                let _ = network_tx.try_send(NetworkCommand::SendAudio(packet));
+                    while pcm_buf.len() >= frame_size {
+                        let frame: Vec<i16> = pcm_buf.drain(..frame_size).collect();
+                        let Ok(len) = encoder.encode(&frame, &mut out_buf) else { continue };
+                        let packet = out_buf[..len].to_vec();
+                        let _ = network_tx.try_send(NetworkCommand::SendAudio(packet));
+                    }
+                }
             }
         }
+
+        drop(stream);
     });
 
+    let sample_rate = ready_rx
+        .recv()
+        .context("audio thread start failed")??;
+
     Ok(AudioRecorder {
-        stream: Some(stream),
+        stop_tx,
         join: Some(join),
         sample_rate,
     })
@@ -107,7 +130,7 @@ fn build_input_stream(
     channels: usize,
     raw_tx: Arc<crossbeam_channel::Sender<Vec<f32>>>,
 ) -> anyhow::Result<Stream> {
-    let err_fn = move |err| eprintln!("cpal stream error: {err}");
+    let err_fn = move |err| log::error!("cpal stream error: {err}");
 
     let stream = match sample_format {
         SampleFormat::F32 => device.build_input_stream(
@@ -134,30 +157,21 @@ fn build_input_stream(
     Ok(stream)
 }
 
-fn push_mono<T: Sample>(data: &[T], channels: usize, raw_tx: &crossbeam_channel::Sender<Vec<f32>>) {
+fn push_mono<T>(data: &[T], channels: usize, raw_tx: &crossbeam_channel::Sender<Vec<f32>>)
+where
+    T: Sample,
+    f32: FromSample<T>,
+{
     if channels == 0 {
         return;
     }
 
     let mut mono = Vec::with_capacity(data.len() / channels);
     for frame in data.chunks(channels) {
-        mono.push(frame[0].to_f32());
+        mono.push(f32::from_sample(frame[0]));
     }
 
     let _ = raw_tx.try_send(mono);
-}
-
-fn opus_encoder(sample_rate: u32) -> anyhow::Result<Encoder> {
-    let sr = match sample_rate {
-        8000 => SampleRate::Hz8000,
-        12000 => SampleRate::Hz12000,
-        16000 => SampleRate::Hz16000,
-        24000 => SampleRate::Hz24000,
-        48000 => SampleRate::Hz48000,
-        _ => return Err(anyhow!("unsupported sample rate for opus: {sample_rate}")),
-    };
-
-    Ok(Encoder::new(sr, Channels::Mono, Application::Voip)?)
 }
 
 fn f32_to_i16(sample: f32) -> i16 {

@@ -2,6 +2,19 @@
 """
 Layer 1: 服务端单独测试
 
+运行前准备（推荐使用虚拟环境）:
+  cd server
+  python -m venv .venv
+
+  # macOS/Linux:
+  source .venv/bin/activate
+  pip install -r requirements-macos.txt   # macOS
+  # 或 pip install -r requirements.txt     # Windows/DirectML
+
+  # Windows PowerShell:
+  .venv\\Scripts\\Activate.ps1
+  pip install -r requirements.txt
+
 运行前先启动服务端:
   cd server
   uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -227,6 +240,11 @@ async def main() -> None:
     print("⚠️  请确保服务端已启动:")
     print("    cd server")
     print("    uvicorn app.main:app --host 0.0.0.0 --port 8000")
+    print("\n提示: 建议先激活虚拟环境并安装依赖:")
+    print("    python -m venv .venv")
+    print("    source .venv/bin/activate          # macOS/Linux")
+    print("    pip install -r requirements-macos.txt  # macOS")
+    print("    # Windows: pip install -r requirements.txt")
 
     if sys.stdin.isatty():
         try:
@@ -262,4 +280,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

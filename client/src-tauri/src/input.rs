@@ -1,4 +1,4 @@
-use enigo::{Enigo, Key, KeyboardControllable};
+use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -25,17 +25,19 @@ pub fn spawn_injector() -> Injector {
 }
 
 fn apply_command(cmd: InjectCommand) {
-    let mut enigo = Enigo::new();
+    let Ok(mut enigo) = Enigo::new(&Settings::default()) else {
+        log::error!("failed to create enigo instance; keyboard injection unavailable");
+        return;
+    };
 
     match cmd {
         InjectCommand::TypeText(text) => {
-            enigo.text(&text);
+            let _ = enigo.text(&text);
         }
         InjectCommand::Backspace(count) => {
             for _ in 0..count {
-                enigo.key_click(Key::Backspace);
+                let _ = enigo.key(Key::Backspace, Direction::Click);
             }
         }
     }
 }
-

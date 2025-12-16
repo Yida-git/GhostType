@@ -6,7 +6,9 @@ venv/
 
 # Rust / Tauri
 /client/src-tauri/target/
+/client/src-tauri/gen/
 /client/node_modules/
+/client/dist/
 
 # Models (do not commit)
 *.onnx

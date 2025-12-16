@@ -33,7 +33,11 @@ pub fn load() -> ClientConfig {
 }
 
 fn default_hotkey() -> String {
-    "capslock".to_string()
+    if cfg!(target_os = "macos") {
+        "f8".to_string()
+    } else {
+        "capslock".to_string()
+    }
 }
 
 fn candidate_paths() -> Vec<PathBuf> {
@@ -46,6 +50,11 @@ fn candidate_paths() -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             paths.push(dir.join("config.json"));
+
+            #[cfg(target_os = "macos")]
+            if let Some(contents_dir) = dir.parent() {
+                paths.push(contents_dir.join("Resources").join("config.json"));
+            }
         }
     }
 

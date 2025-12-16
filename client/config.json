@@ -3,5 +3,5 @@
     "ws://127.0.0.1:8000/ws"
   ],
   "use_cloud_api": false,
-  "hotkey": "capslock"
+  "hotkey": "f8"
 }

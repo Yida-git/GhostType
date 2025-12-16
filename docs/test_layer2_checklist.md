@@ -1,77 +1,92 @@
-# Layer 2: 客户端单独测试 (人工)
+# Layer 2: 客户端单独测试（人工，多平台）
 
 ## 准备工作
-1. 确保服务端正在运行
-2. `cd client && npm run tauri dev`
+1. 确保服务端正在运行（`cd server && uvicorn app.main:app --host 0.0.0.0 --port 8000`）
+2. 启动客户端（`cd client && npm run tauri dev`）
+3. 记录当前热键（来自 `config.json`）: ______________  
+   - macOS 默认：`F8`（如无响应可尝试 `Fn+F8`，或在系统设置启用“将 F1/F2 等用作标准功能键”）
+   - Windows 默认：`CapsLock`
 
 ---
 
 ## T2.1: 托盘图标
-- [ ] 托盘区域出现 GhostType 图标 (不是空白/默认)
-- [ ] 右键点击显示菜单 (Show / Hide / Quit)
+- [ ] 托盘区域出现 GhostType 图标（不是空白/默认）
+- [ ] 右键点击显示菜单（Show / Hide / Quit）
 - [ ] 点击 Show 显示窗口
 - [ ] 点击 Hide 隐藏窗口
-- [ ] 点击 Quit 正常退出 (无崩溃)
+- [ ] 点击 Quit 正常退出（无崩溃）
 
 失败处理:
-- 检查 `client/src-tauri/src/main.rs` 的 `TrayIconBuilder::new().icon(...)` 是否生效
-- 检查 `client/src-tauri/icons/32x32.png` 是否存在
+- 检查 `client/src-tauri/src/main.rs` 的 `TrayIconBuilder` 是否生效
+- 检查 `client/src-tauri/icons/32x32.png` / `client/src-tauri/icons/32x32@2x.png` 是否存在
 
 ---
 
 ## T2.2: 热键监听
-- [ ] 按下 CapsLock，控制台输出相关日志
-- [ ] 松开 CapsLock，控制台输出相关日志
-- [ ] CapsLock 原有功能行为: ______________ (记录: 是否被拦截/是否影响大小写切换)
+### macOS
+- [ ] 按下热键（默认 `F8`）控制台输出 `start...`
+- [ ] 松开热键控制台输出 `stop`
+- [ ] 若配置为 `CapsLock`：记录是否触发系统大写锁定: ______________
+
+### Windows
+- [ ] 按下热键（默认 `CapsLock`）控制台输出 `start...`
+- [ ] 松开热键控制台输出 `stop`
+- [ ] CapsLock 原有功能行为: ______________（记录是否被拦截/是否影响大小写切换）
 
 失败处理:
-- 检查 rdev 是否正常工作
-- Windows 是否有权限/被安全软件拦截
+- 检查 `rdev` 是否正常工作
+- Windows 是否被安全软件拦截/缺少权限
 
 ---
 
-## T2.3: 麦克风权限
-- [ ] 按下 CapsLock 后，控制台无 `no input device` 错误
+## T2.3: 权限（麦克风 / 辅助功能）
+### macOS
+- [ ] 首次录音触发麦克风权限弹窗并允许（或已授权）
+- [ ] 系统设置 -> 隐私与安全性 -> 麦克风 中能看到 GhostType
+- [ ] 系统设置 -> 隐私与安全性 -> 辅助功能 中启用 GhostType（否则热键/注入可能无效）
+- [ ] 控制台无 `no input device` 错误
 - [ ] 控制台显示采样率: ________ Hz
-- [ ] Windows 麦克风权限:
-  - [ ] 未弹窗 (已有权限)
-  - [ ] 弹窗并点击允许
-  - [ ] 被拒绝 → 需要手动在设置中开启
+
+### Windows
+- [ ] 首次录音触发麦克风权限（或已授权）
+- [ ] 控制台无 `no input device` 错误
+- [ ] 控制台显示采样率: ________ Hz
 
 失败处理:
-- Windows 设置 → 隐私 → 麦克风 → 允许应用访问
+- macOS：系统设置 -> 隐私与安全性 -> 麦克风 / 辅助功能
+- Windows：设置 -> 隐私 -> 麦克风 -> 允许应用访问
 
 ---
 
 ## T2.4: 网络发送
 观察服务端控制台:
 - [ ] 显示 WebSocket 连接建立
-- [ ] 按住 CapsLock 后，服务端显示收到 `start` 消息
-- [ ] 服务端显示收到 binary 音频帧
-- [ ] 松开后，服务端显示收到 `stop` 消息
+- [ ] 按住热键后服务端收到 `start`
+- [ ] 服务端持续收到 binary 音频帧
+- [ ] 松开热键后服务端收到 `stop`
 
 失败处理:
-- 检查 `client/config.json` 的 `server_endpoints` 配置
+- 检查 `client/config.json` 的 `server_endpoints`
 - 检查服务端端口/防火墙/同网段
 
 ---
 
 ## T2.5: 键盘注入
-1. 打开记事本，光标聚焦
-2. 按住 CapsLock 说 “测试”，松开
+1. 打开任意可输入文本的应用并聚焦光标（如 记事本/备忘录/VS Code）
+2. 按住热键说 “测试”，松开
 3. 观察:
-   - [ ] 服务端返回 `fast_text`
-   - [ ] 记事本中出现文字
+   - [ ] 服务端返回 `fast_text`（或 `error`）
+   - [ ] 目标应用中出现文字
    - [ ] 文字内容: ______________
 
 失败处理:
-- 如果有日志但无文字输出，检查 enigo 权限
-- 如果文字乱码，检查编码/输入法状态
+- macOS：优先检查“辅助功能”是否授权（注入/热键都依赖）
+- Windows：检查是否被安全软件拦截；确认输入法/焦点窗口正确
 
 ---
 
 ## 签字确认
 - 测试人: ______________
 - 日期: ______________
+- 平台: [ ] macOS  [ ] Windows
 - 结果: [ ] 全部通过  [ ] 有问题需修复
-

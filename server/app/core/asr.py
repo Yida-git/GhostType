@@ -47,7 +47,7 @@ class SenseVoiceEngine:
     ) -> None:
         if ort is None or np is None:
             raise RuntimeError(
-                "onnxruntime/numpy not installed; add `onnxruntime-directml` (Windows) or `onnxruntime-gpu` (CUDA) or `onnxruntime` + `numpy`"
+                "onnxruntime/numpy not installed; add `onnxruntime-directml` (Windows) or `onnxruntime-gpu` (CUDA) or `onnxruntime` + `numpy` (macOS/Linux CPU, 可选 CoreML)"
             )
 
         self.model_path = Path(model_path)
@@ -75,6 +75,7 @@ class SenseVoiceEngine:
         available_set = set(available)
         preferred = preferred_providers or [
             "CUDAExecutionProvider",
+            "CoreMLExecutionProvider",
             "DmlExecutionProvider",
             "CPUExecutionProvider",
         ]

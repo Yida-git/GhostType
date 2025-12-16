@@ -1,0 +1,16 @@
+# Opus codec reference implementation pkg-config file
+
+prefix=/var/folders/h2/l77g9rlx3gj2pck1xt3nwdcc0000gn/T/ghosttype_opus_out_81c90f7394c9f9c5
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: Opus
+Description: Opus IETF audio codec (floating-point build)
+URL: http://opus-codec.org/
+Version: 1.1
+Requires:
+Conflicts:
+Libs: -L${libdir} -lopus
+Libs.private: 
+Cflags: -I${includedir}/opus

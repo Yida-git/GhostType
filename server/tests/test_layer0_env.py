@@ -66,18 +66,27 @@ def test_onnxruntime_providers() -> bool:
         return False
 
     providers = ort.get_available_providers()
+    version = getattr(ort, "__version__", None)
+    if version:
+        print(f"  onnxruntime: {version}")
     print(f"  可用 Providers: {providers}")
 
     has_dml = "DmlExecutionProvider" in providers
     has_cuda = "CUDAExecutionProvider" in providers
+    has_coreml = "CoreMLExecutionProvider" in providers
     has_cpu = "CPUExecutionProvider" in providers
 
     if has_dml:
         print("  ✅ DirectML 可用 (Windows GPU)")
     if has_cuda:
         print("  ✅ CUDA 可用 (NVIDIA GPU)")
-    if not has_dml and not has_cuda:
-        print("  ⚠️  警告: 只有 CPU，ASR 性能可能不足")
+    if has_coreml:
+        print("  ✅ CoreML 可用 (macOS)")
+    if not has_dml and not has_cuda and not has_coreml:
+        if sys.platform == "darwin":
+            print("  ⚠️  警告: 未检测到 CoreML Provider，将使用 CPU，ASR 性能可能不足")
+        else:
+            print("  ⚠️  警告: 只有 CPU，ASR 性能可能不足")
 
     if not has_cpu:
         print("  ❌ 连 CPU Provider 都没有，onnxruntime 安装异常")
