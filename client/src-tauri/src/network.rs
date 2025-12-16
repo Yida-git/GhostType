@@ -210,6 +210,7 @@ async fn handle_server_text(text: &str, injector: &Injector, tray: &Arc<TrayCont
                     text: replaced_text,
                 })
                 .await;
+            tray.set_idle();
         }
         ServerEvent::Error { trace_id, message } => {
             tray.set_error();
