@@ -9,6 +9,7 @@ venv/
 /client/src-tauri/gen/
 /client/node_modules/
 /client/dist/
+/client/src-tauri/icons/icon.ico
 
 # Models (do not commit)
 *.onnx

@@ -22,6 +22,7 @@
 ```json
 {
   "type": "start",
+  "trace_id": "a1b2c3",
   "sample_rate": 48000,
   "context": {
     "app_name": "Visual Studio Code",
@@ -34,7 +35,7 @@
 #### `stop`
 
 ```json
-{ "type": "stop" }
+{ "type": "stop", "trace_id": "a1b2c3" }
 ```
 
 ### Client -> Server (Binary)
@@ -54,6 +55,7 @@
 ```json
 {
   "type": "fast_text",
+  "trace_id": "a1b2c3",
   "content": "测试文本",
   "is_final": true
 }
@@ -75,6 +77,5 @@
 #### `error`
 
 ```json
-{ "type": "error", "message": "reason" }
+{ "type": "error", "trace_id": "a1b2c3", "message": "reason" }
 ```
-

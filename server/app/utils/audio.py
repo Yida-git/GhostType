@@ -17,6 +17,7 @@ except Exception:  # noqa: BLE001 - optional at import time; raised on decode if
 
 _OGG_CRC_POLY = 0x04C11DB7
 _OGG_OPUS_GRANULE_RATE = 48000
+_SUPPORTED_OPUS_RATES = (8000, 12000, 16000, 24000, 48000)
 
 
 def _make_ogg_crc_table() -> List[int]:
@@ -109,6 +110,12 @@ def _build_ogg_page(
 
 
 def packets_to_ogg_opus_bytes(opus_packets: Iterable[bytes], input_sample_rate: int) -> bytes:
+    if input_sample_rate not in _SUPPORTED_OPUS_RATES:
+        raise ValueError(
+            f"不支持的采样率 | Unsupported sample rate: {input_sample_rate}. "
+            f"支持 | Supported: {_SUPPORTED_OPUS_RATES}"
+        )
+
     packets = list(opus_packets)
     serial = secrets.randbits(32)
 

@@ -12,7 +12,7 @@ use fallback as imp;
 ///
 /// - `prompt=true`：触发系统弹窗引导（如果尚未授权）
 /// - 非 macOS：直接返回 `true`
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn ensure_accessibility(prompt: bool) -> bool {
     imp::ensure_accessibility(prompt)
 }
-

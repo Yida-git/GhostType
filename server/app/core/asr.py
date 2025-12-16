@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
+from app.logging_config import get_logger, setup_logging
+
+setup_logging()
+log = get_logger("asr")
+
 try:
     import numpy as np  # type: ignore[import-not-found]
     import onnxruntime as ort  # type: ignore[import-not-found]
@@ -229,7 +234,12 @@ class SenseVoiceEngine:
                 continue
 
         if last_exc is not None:
-            print(f"WARNING: failed to init DML providers for {self.model_path}: {last_exc}; using CPU")
+            log.warning(
+                "DirectML 初始化失败，回退 CPU | DML init failed, falling back to CPU | "
+                "model={model} error={error}",
+                model=str(self.model_path),
+                error=str(last_exc),
+            )
         return cpu_session
 
     def _candidate_dml_device_ids(self) -> List[int]:

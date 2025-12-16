@@ -120,6 +120,7 @@ async def test_ping_pong(result: TestResult) -> None:
 async def test_start_stop_flow(result: TestResult) -> None:
     """T1.4: Start/Stop 流程 (无音频)"""
     print("\nT1.4: Start/Stop 流程 (无音频)")
+    trace_id = "a1b2c3"
     try:
         import websockets
 
@@ -128,6 +129,7 @@ async def test_start_stop_flow(result: TestResult) -> None:
                 json.dumps(
                     {
                         "type": "start",
+                        "trace_id": trace_id,
                         "sample_rate": 48000,
                         "context": {"app_name": "TestScript", "window_title": "test"},
                         "use_cloud_api": False,
@@ -135,13 +137,16 @@ async def test_start_stop_flow(result: TestResult) -> None:
                     ensure_ascii=False,
                 )
             )
-            await ws.send(json.dumps({"type": "stop"}))
+            await ws.send(json.dumps({"type": "stop", "trace_id": trace_id}))
 
             try:
                 response = await asyncio.wait_for(ws.recv(), timeout=NORMAL_TIMEOUT)
                 data = json.loads(response)
                 if data.get("type") in ("fast_text", "error"):
-                    result.ok("T1.4 Start/Stop", f"type={data.get('type')}")
+                    if data.get("trace_id") and data.get("trace_id") != trace_id:
+                        result.fail("T1.4 Start/Stop", f"trace_id mismatch: {data.get('trace_id')}")
+                    else:
+                        result.ok("T1.4 Start/Stop", f"type={data.get('type')}")
                 else:
                     result.warn("T1.4 Start/Stop", f"unexpected: {data.get('type')}")
             except asyncio.TimeoutError:

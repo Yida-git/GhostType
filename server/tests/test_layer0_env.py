@@ -40,6 +40,7 @@ def test_imports() -> bool:
         ("fastapi", "FastAPI"),
         ("uvicorn", "uvicorn"),
         ("websockets", "websockets"),
+        ("loguru", "loguru"),
         ("av", "PyAV"),
         ("numpy", "numpy"),
         ("onnxruntime", "onnxruntime"),

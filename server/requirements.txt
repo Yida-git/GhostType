@@ -2,6 +2,9 @@ fastapi
 uvicorn[standard]
 httpx
 pyyaml
+loguru>=0.7.0
+pystray
+Pillow
 av
 numpy
 onnxruntime-directml

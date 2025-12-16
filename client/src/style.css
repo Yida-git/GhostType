@@ -1,9 +1,141 @@
+:root {
+  color-scheme: light dark;
+  --bg: #0b0d12;
+  --panel: #131826;
+  --text: #e9ecf3;
+  --muted: #a6afc3;
+  --border: #2a3245;
+  --accent: #4c8dff;
+  --ok: #2ecc71;
+  --err: #ff5b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: radial-gradient(1200px 600px at 20% -20%, #1a2440, transparent 70%),
+    radial-gradient(900px 500px at 90% 10%, #1f1a3f, transparent 60%),
+    var(--bg);
+  color: var(--text);
 }
 
-#app {
-  padding: 24px;
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 22px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: 0.2px;
+}
+
+.sub {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.card {
+  margin-top: 18px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--panel) 90%, #000 10%);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.card h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+.field {
+  margin: 12px 0;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-color: color-mix(in oklab, var(--accent) 70%, var(--border));
+  box-shadow: 0 0 0 3px rgba(76, 141, 255, 0.25);
+}
+
+.hotkeyRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 680px) {
+  .hotkeyRow {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.hint {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+button {
+  appearance: none;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 75%, #fff 0%), var(--accent));
+  color: #071021;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+.status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status[data-kind="ok"] {
+  color: var(--ok);
+}
+
+.status[data-kind="error"] {
+  color: var(--err);
+}
+
+.hidden {
+  display: none;
 }
 

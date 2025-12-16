@@ -64,6 +64,13 @@ mod imp {
 
     impl OpusEncoder {
         pub fn new(sample_rate: u32) -> anyhow::Result<Self> {
+            if !matches!(sample_rate, 8000 | 12000 | 16000 | 24000 | 48000) {
+                return Err(anyhow!(
+                    "不支持的 Opus 采样率 | Unsupported Opus sample rate: {} (支持 8000/12000/16000/24000/48000)",
+                    sample_rate
+                ));
+            }
+
             let channels = 1i32;
             let mut err = 0i32;
             let encoder = unsafe {

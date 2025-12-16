@@ -181,7 +181,8 @@ GhostType/
 | `GHOSTTYPE_DUMP_WAV=1` | Save decoded audio to temp directory |
 | `GHOSTTYPE_DUMP_WAV_DIR=/path` | Custom WAV dump directory |
 | `GHOSTTYPE_LOG_TIMINGS=1` | Print decode/ASR timing info |
-| `GHOSTTYPE_LOG=debug` | Client log level (error/warn/info/debug/trace) |
+| `GHOSTTYPE_LOG=debug` | Log level (error/warn/info/debug/trace) |
+| `GHOSTTYPE_LOG_FILE=1` | Enable server log file output (`logs/`) |
 
 ## Protocol
 
