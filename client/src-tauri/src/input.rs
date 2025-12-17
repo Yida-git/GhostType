@@ -86,8 +86,17 @@ fn apply_command(cmd: InjectCommand) {
                     "退格注入 | Backspace injected"
                 );
             }
-            for _ in 0..count {
-                let _ = enigo.key(Key::Backspace, Direction::Click);
+            for idx in 0..count {
+                if let Err(err) = enigo.key(Key::Backspace, Direction::Click) {
+                    error!(
+                        target: "input",
+                        trace_id = trace_id.as_deref().unwrap_or(""),
+                        index = idx,
+                        error = %err,
+                        "退格注入失败 | Backspace injection failed"
+                    );
+                    break;
+                }
             }
         }
     }

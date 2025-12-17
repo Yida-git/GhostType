@@ -4,6 +4,9 @@ pub struct OpusEncoder {
     inner: imp::OpusEncoder,
 }
 
+// Opus encoder 只要不并发使用（我们保证单线程/单任务顺序调用），跨线程移动是安全的。
+unsafe impl Send for OpusEncoder {}
+
 impl OpusEncoder {
     pub fn new(sample_rate: u32) -> anyhow::Result<Self> {
         Ok(Self {

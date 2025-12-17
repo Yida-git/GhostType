@@ -16,3 +16,18 @@ use fallback as imp;
 pub fn ensure_accessibility(prompt: bool) -> bool {
     imp::ensure_accessibility(prompt)
 }
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    imp::open_accessibility_settings()
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn open_microphone_settings() -> Result<(), String> {
+    imp::open_microphone_settings()
+}
+
+#[allow(dead_code)]
+pub fn open_sound_settings() -> Result<(), String> {
+    imp::open_sound_settings()
+}

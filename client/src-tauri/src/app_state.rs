@@ -1,22 +1,27 @@
 use std::sync::Mutex;
 
-use tokio::sync::mpsc;
+use tauri::async_runtime::JoinHandle;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::audio::AudioRecorder;
-use crate::network::{NetworkCommand, NetworkHandle};
+use crate::pipeline::Pipeline;
 
 pub struct AppState {
     pub audio: Mutex<Option<AudioRecorder>>,
-    pub use_cloud_api: bool,
-    pub tx: mpsc::Sender<NetworkCommand>,
+    pub audio_task: Mutex<Option<JoinHandle<()>>>,
+    pub session_gen: Mutex<Option<u64>>,
+    pub pipeline: AsyncMutex<Pipeline>,
+    pub audio_device: Option<String>,
 }
 
 impl AppState {
-    pub fn new(network: NetworkHandle, use_cloud_api: bool) -> Self {
+    pub fn new(pipeline: Pipeline, audio_device: Option<String>) -> Self {
         Self {
-            tx: network.tx.clone(),
             audio: Mutex::new(None),
-            use_cloud_api,
+            audio_task: Mutex::new(None),
+            session_gen: Mutex::new(None),
+            pipeline: AsyncMutex::new(pipeline),
+            audio_device,
         }
     }
 }

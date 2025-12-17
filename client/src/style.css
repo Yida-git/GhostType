@@ -54,8 +54,19 @@ body {
   font-size: 18px;
 }
 
+.cardWarn {
+  border-color: color-mix(in oklab, var(--err) 40%, var(--border));
+  background: color-mix(in oklab, var(--panel) 85%, var(--err) 8%);
+}
+
 .field {
   margin: 12px 0;
+}
+
+.divider {
+  height: 1px;
+  margin: 16px 0;
+  background: color-mix(in oklab, var(--border) 70%, transparent);
 }
 
 label {
@@ -122,6 +133,17 @@ button:hover {
   filter: brightness(1.05);
 }
 
+.secondary {
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.secondary:hover {
+  filter: none;
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+}
+
 .status {
   color: var(--muted);
   font-size: 13px;
@@ -135,7 +157,80 @@ button:hover {
   color: var(--err);
 }
 
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.badge[data-kind="ok"] {
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 40%, var(--border));
+}
+
+.badge[data-kind="error"] {
+  color: var(--err);
+  border-color: color-mix(in oklab, var(--err) 40%, var(--border));
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.statusGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.permGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+@media (min-width: 680px) {
+  .permGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.permItem {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.permTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.deviceList {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .hidden {
   display: none;
 }
-

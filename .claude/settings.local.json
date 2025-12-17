@@ -4,7 +4,12 @@
       "Bash(dir:*)",
       "Bash(cd:*)",
       "Bash(cargo check:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(git -C \"/Users/songyida/Documents/claude-work/01- 大型项目/GhostType\" log --oneline -15)",
+      "Bash(wc:*)"
     ]
   }
 }

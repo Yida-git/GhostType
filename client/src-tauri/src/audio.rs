@@ -3,10 +3,14 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, FromSample, Sample, SampleFormat, Stream, StreamConfig};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
-use crate::network::NetworkCommand;
-use crate::opus::OpusEncoder;
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InputDeviceInfo {
+    pub name: String,
+    pub is_default: bool,
+}
 
 pub struct AudioRecorder {
     stop_tx: crossbeam_channel::Sender<()>,
@@ -25,20 +29,20 @@ impl AudioRecorder {
 }
 
 pub fn start_audio(
-    network_tx: tokio::sync::mpsc::Sender<NetworkCommand>,
     trace_id: String,
-) -> anyhow::Result<AudioRecorder> {
+    device_name: Option<String>,
+) -> anyhow::Result<(AudioRecorder, mpsc::Receiver<Vec<i16>>)> {
     let (stop_tx, stop_rx) = crossbeam_channel::bounded::<()>(1);
     let (ready_tx, ready_rx) = crossbeam_channel::bounded::<anyhow::Result<u32>>(1);
+    let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<i16>>(64);
 
     let trace_id_for_thread = trace_id.clone();
+    let requested_device = device_name.clone();
     let join = std::thread::spawn(move || {
         let start_result =
-            (|| -> anyhow::Result<(Stream, crossbeam_channel::Receiver<Vec<f32>>, OpusEncoder, u32, String)> {
+            (|| -> anyhow::Result<(Stream, crossbeam_channel::Receiver<Vec<f32>>, u32, String)> {
             let host = cpal::default_host();
-            let device = host
-                .default_input_device()
-                .ok_or_else(|| anyhow!("no input device"))?;
+            let device = select_input_device(&host, requested_device.as_deref())?;
 
             let device_name = device.name().unwrap_or_else(|_| "default".to_string());
             let (config, sample_format, sample_rate) = pick_stream_config(&device)?;
@@ -50,14 +54,12 @@ pub fn start_audio(
             let stream = build_input_stream(&device, &config, sample_format, channels, raw_tx)?;
             stream.play().context("start input stream")?;
 
-            let encoder = OpusEncoder::new(sample_rate)?;
-
-            Ok((stream, raw_rx, encoder, sample_rate, device_name))
+            Ok((stream, raw_rx, sample_rate, device_name))
         })();
 
-        let (stream, raw_rx, mut encoder, sample_rate, device_name) = match start_result {
+        let (stream, raw_rx, sample_rate, device_name) = match start_result {
             Ok(parts) => {
-                let _ = ready_tx.send(Ok(parts.3));
+                let _ = ready_tx.send(Ok(parts.2));
                 parts
             }
             Err(err) => {
@@ -76,11 +78,9 @@ pub fn start_audio(
 
         let frame_size = (sample_rate / 50) as usize;
         let mut pcm_buf: Vec<i16> = Vec::with_capacity(frame_size * 4);
-        let mut out_buf = vec![0u8; 4096];
         let started_at = Instant::now();
-        let mut seq: u64 = 0;
         let mut packets: u64 = 0;
-        let mut total_bytes: u64 = 0;
+        let mut total_samples: u64 = 0;
 
         loop {
             crossbeam_channel::select! {
@@ -91,23 +91,18 @@ pub fn start_audio(
 
                     while pcm_buf.len() >= frame_size {
                         let frame: Vec<i16> = pcm_buf.drain(..frame_size).collect();
-                        let Ok(len) = encoder.encode(&frame, &mut out_buf) else { continue };
-                        let packet = out_buf[..len].to_vec();
-                        seq = seq.wrapping_add(1);
                         packets = packets.wrapping_add(1);
-                        total_bytes = total_bytes.wrapping_add(len as u64);
+                        total_samples = total_samples.wrapping_add(frame.len() as u64);
                         debug!(
                             target: "audio",
                             trace_id = %trace_id_for_thread,
-                            bytes = len,
-                            seq = seq,
-                            "音频帧已编码 | Audio frame encoded"
+                            samples = frame.len(),
+                            packets = packets,
+                            "音频帧已采集 | Audio frame captured"
                         );
-                        let _ = network_tx.try_send(NetworkCommand::SendAudio {
-                            trace_id: trace_id_for_thread.clone(),
-                            seq,
-                            bytes: packet,
-                        });
+                        if pcm_tx.blocking_send(frame).is_err() {
+                            break;
+                        }
                     }
                 }
             }
@@ -118,7 +113,7 @@ pub fn start_audio(
             trace_id = %trace_id_for_thread,
             duration_ms = started_at.elapsed().as_millis(),
             packets = packets,
-            total_bytes = total_bytes,
+            total_samples = total_samples,
             "录音结束 | Recording stopped"
         );
 
@@ -129,12 +124,91 @@ pub fn start_audio(
         .recv()
         .context("audio thread start failed")??;
 
-    Ok(AudioRecorder {
-        stop_tx,
-        join: Some(join),
-        trace_id,
-        sample_rate,
-    })
+    Ok((
+        AudioRecorder {
+            stop_tx,
+            join: Some(join),
+            trace_id,
+            sample_rate,
+        },
+        pcm_rx,
+    ))
+}
+
+pub fn list_input_devices() -> anyhow::Result<Vec<InputDeviceInfo>> {
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .and_then(|d| d.name().ok())
+        .unwrap_or_default();
+
+    let mut out = Vec::new();
+    if let Ok(devices) = host.input_devices() {
+        for device in devices {
+            let Ok(name) = device.name() else {
+                continue;
+            };
+            out.push(InputDeviceInfo {
+                is_default: !default_name.is_empty() && name == default_name,
+                name,
+            });
+        }
+    }
+
+    if out.is_empty() && !default_name.is_empty() {
+        out.push(InputDeviceInfo {
+            name: default_name,
+            is_default: true,
+        });
+    }
+
+    Ok(out)
+}
+
+pub fn check_microphone_access(requested: Option<&str>) -> bool {
+    let host = cpal::default_host();
+    let Ok(device) = select_input_device(&host, requested) else {
+        return false;
+    };
+    device.default_input_config().is_ok()
+}
+
+fn select_input_device(host: &cpal::Host, requested: Option<&str>) -> anyhow::Result<Device> {
+    let requested = requested.and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+
+    if let Some(want) = requested {
+        if let Ok(devices) = host.input_devices() {
+            for device in devices {
+                let Ok(name) = device.name() else {
+                    continue;
+                };
+                if name == want {
+                    info!(
+                        target: "audio",
+                        device = name.as_str(),
+                        "选择音频输入设备 | Audio input device selected"
+                    );
+                    return Ok(device);
+                }
+            }
+        }
+
+        tracing::warn!(
+            target: "audio",
+            device = want,
+            "未找到指定音频设备，回退默认设备 | Requested device not found, falling back to default"
+        );
+    }
+
+    host.default_input_device()
+        .ok_or_else(|| anyhow!("no input device"))
 }
 
 fn pick_stream_config(device: &Device) -> anyhow::Result<(StreamConfig, SampleFormat, u32)> {

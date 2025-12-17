@@ -1,21 +1,49 @@
 use std::fmt;
+use std::fs::OpenOptions;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::fmt::format::{FormatEvent, FormatFields, Writer};
 use tracing_subscriber::fmt::FmtContext;
+use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::EnvFilter;
 
 pub fn init() {
     let filter = env_filter();
-    let fmt_layer = tracing_subscriber::fmt::layer().event_format(GhostTypeFormat);
+    let fmt_stderr = tracing_subscriber::fmt::layer()
+        .event_format(GhostTypeFormat)
+        .with_writer(std::io::stderr);
 
-    // NOTE: Use `try_init` to avoid panicking when Tauri reloads in dev.
-    let _ = tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt_layer)
-        .try_init();
+    let wants_file = match std::env::var("GHOSTTYPE_LOG_FILE") {
+        Ok(v) => !v.trim().is_empty(),
+        Err(_) => false,
+    };
+
+    if wants_file {
+        match build_file_writer() {
+            Ok(writer) => {
+                let fmt_file = tracing_subscriber::fmt::layer()
+                    .event_format(GhostTypeFormat)
+                    .with_writer(writer);
+
+                let _ = tracing_subscriber::registry()
+                    .with(filter)
+                    .with(fmt_stderr)
+                    .with(fmt_file)
+                    .try_init();
+            }
+            Err(err) => {
+                eprintln!("[logging] 日志文件初始化失败，回退 stderr: {err}");
+                let _ = tracing_subscriber::registry().with(filter).with(fmt_stderr).try_init();
+            }
+        }
+        return;
+    }
+
+    let _ = tracing_subscriber::registry().with(filter).with(fmt_stderr).try_init();
 }
 
 fn env_filter() -> EnvFilter {
@@ -182,4 +210,83 @@ fn quote_value_if_needed(raw: &str) -> String {
         return trimmed.to_string();
     }
     format!("\"{}\"", trimmed.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[derive(Clone)]
+struct SharedFileWriter {
+    file: Arc<Mutex<std::fs::File>>,
+}
+
+struct SharedFileGuard {
+    file: Arc<Mutex<std::fs::File>>,
+}
+
+impl<'a> MakeWriter<'a> for SharedFileWriter {
+    type Writer = SharedFileGuard;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        SharedFileGuard {
+            file: self.file.clone(),
+        }
+    }
+}
+
+impl std::io::Write for SharedFileGuard {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut guard = self.file.lock().expect("log file lock");
+        guard.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut guard = self.file.lock().expect("log file lock");
+        guard.flush()
+    }
+}
+
+fn build_file_writer() -> std::io::Result<SharedFileWriter> {
+    let log_path = resolve_log_path();
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    rotate_if_too_large(&log_path, 5 * 1024 * 1024)?;
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+
+    Ok(SharedFileWriter {
+        file: Arc::new(Mutex::new(file)),
+    })
+}
+
+fn resolve_log_path() -> PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    exe_dir.join("logs").join("ghosttype_client.log")
+}
+
+fn rotate_if_too_large(path: &Path, max_bytes: u64) -> std::io::Result<()> {
+    let meta = match std::fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(_) => return Ok(()),
+    };
+
+    if meta.len() <= max_bytes {
+        return Ok(());
+    }
+
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S%.3f");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("ghosttype_client");
+    let rotated = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{stem}_{ts}.log"));
+    let _ = std::fs::rename(path, rotated);
+    Ok(())
 }

@@ -23,7 +23,23 @@ from app.utils.audio import decode_opus_packets_to_pcm_s16le, write_wav_s16le
 
 app = FastAPI()
 
-MODEL_PATH = Path(__file__).parent.parent / "models" / "sensevoice-small.onnx"
+
+def _resolve_model_path() -> Path:
+    """
+    解析 ASR 模型路径。
+
+    - 优先使用环境变量 `GHOSTTYPE_BASE_PATH`（打包/安装模式）
+    - 未设置时保持原行为：相对于 server/ 目录的 models/
+    """
+
+    base = (os.environ.get("GHOSTTYPE_BASE_PATH") or "").strip()
+    if base:
+        return Path(base).expanduser() / "models" / "sensevoice-small.onnx"
+
+    return Path(__file__).parent.parent / "models" / "sensevoice-small.onnx"
+
+
+MODEL_PATH = _resolve_model_path()
 asr_engine: AsrEngine = StubAsrEngine()
 
 
@@ -200,6 +216,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 except Exception as exc:
                     await _send_error(ws, f"asr failed: {exc}", trace_id=state.trace_id)
                     text = f"[asr_error: {exc}]"
+                    t_asr1 = time.perf_counter()
 
                 asr_ms = (t_asr1 - t_asr0) * 1000.0
                 total_ms = (t_asr1 - t0) * 1000.0

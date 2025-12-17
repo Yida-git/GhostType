@@ -46,6 +46,22 @@
 - [ ] D1（测试）：Mac 上运行 Layer 0 环境验证
 - [ ] D2（测试）：Mac 上运行 Layer 1 服务端测试
 
+### P0（本轮新增：Server/Client GUI + Windows）
+- [x] E1（测试）：新增 Layer 2 打包单测：`server/tests/test_layer2_packaging.py`
+  - 验收口径：无需启动服务端即可运行；覆盖 `server_entry/gui/main` 的路径解析与打包逻辑
+- [x] E2（开发）：服务端 GUI 设置界面（host/port/log_level）
+  - 验收口径：GUI 可编辑配置并保存到 `config.json`；点击“保存并重启服务”后服务端重启生效
+- [x] E3（开发）：服务端 GUI 状态显示（运行状态/连接数/模型/Provider/ASR 耗时）
+  - 验收口径：状态可随日志实时更新；重启后状态能重置并恢复
+- [x] E4（开发）：客户端权限引导（macOS 辅助功能 + 麦克风；Windows 麦克风/设备引导）
+  - 验收口径：权限缺失时窗口自动弹出引导；支持一键打开系统设置并可刷新状态
+- [x] E5（开发）：客户端设置界面增强（连接测试 + 音频输入设备选择 + 状态卡片）
+  - 验收口径：可测试服务器连接；可选择音频输入设备并写入配置（重启生效）
+- [x] E6（开发）：客户端日志文件输出（`GHOSTTYPE_LOG_FILE=1`）
+  - 验收口径：写入 `<exe_dir>/logs/ghosttype_client.log`，并在文件过大时自动轮转
+- [ ] E7（测试）：Windows 环境端到端测试
+  - 验收口径：按 `docs/test_windows_e2e_checklist.md` 执行并记录结果
+
 ### P1（体验/质量提升）
 - [x] A1（开发/核对）：完善打包场景下 `config.json` 搜索（`client/src-tauri/src/config.rs`）
   - 说明：已补充 macOS `.app/Contents/Resources/config.json` 候选路径

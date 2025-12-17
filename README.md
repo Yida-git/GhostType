@@ -97,6 +97,15 @@ pip install -r requirements.txt
 .\run.bat
 ```
 
+#### Windows (Standalone EXE / 打包版)
+
+If you prefer running the server without a Python environment, use the packaged executable workflow:
+
+- User guide: `docs/user-guide-windows.md`
+- Build on Windows: `build\windows\build.bat`
+- Output: `releases\windows\GhostType-Server\`
+- Model path: `releases\windows\GhostType-Server\models\sensevoice-small.onnx`
+
 Server listens on `ws://0.0.0.0:8000/ws`.
 
 ### 2. Client Setup

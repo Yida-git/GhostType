@@ -20,6 +20,12 @@ server/models/*
 !server/models/.gitkeep
 !server/models/README.md
 
+# Build artifacts (do not commit)
+releases/*
+!releases/.gitkeep
+build/*/dist/
+build/*/build/
+
 # OS
 .DS_Store
 Thumbs.db

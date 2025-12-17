@@ -1,15 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app_state;
+mod asr;
 mod audio;
 mod config;
 mod input;
+mod llm;
 mod logging;
-mod network;
 mod opus;
+mod pipeline;
 mod platform;
 
-use crate::network::{ClientContext, ClientControl, NetworkCommand};
 use active_win_pos_rs::ActiveWindow;
 use rdev::{EventType, Key};
 use std::sync::{Arc, Mutex};
@@ -136,6 +137,18 @@ struct ClientConfigResponse {
     path: Option<String>,
 }
 
+#[derive(serde::Serialize)]
+struct RuntimeInfo {
+    os: String,
+    arch: String,
+}
+
+#[derive(serde::Serialize)]
+struct PermissionStatus {
+    accessibility: bool,
+    microphone: bool,
+}
+
 #[tauri::command]
 fn load_client_config() -> ClientConfigResponse {
     let (config, path) = config::load_with_path();
@@ -155,6 +168,101 @@ fn save_client_config(config: config::ClientConfig) -> Result<ClientConfigRespon
     })
 }
 
+#[tauri::command]
+fn get_runtime_info() -> RuntimeInfo {
+    RuntimeInfo {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+    }
+}
+
+#[tauri::command]
+fn list_audio_devices() -> Result<Vec<audio::InputDeviceInfo>, String> {
+    audio::list_input_devices().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn check_permissions(state: tauri::State<'_, Arc<app_state::AppState>>) -> PermissionStatus {
+    let accessibility = if cfg!(target_os = "macos") {
+        platform::ensure_accessibility(false)
+    } else {
+        true
+    };
+
+    let microphone = audio::check_microphone_access(state.audio_device.as_deref());
+
+    PermissionStatus {
+        accessibility,
+        microphone,
+    }
+}
+
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    platform::open_accessibility_settings()
+}
+
+#[tauri::command]
+fn open_microphone_settings() -> Result<(), String> {
+    platform::open_microphone_settings()
+}
+
+#[tauri::command]
+fn open_sound_settings() -> Result<(), String> {
+    platform::open_sound_settings()
+}
+
+#[tauri::command]
+async fn test_server_connection(endpoint: String) -> Result<bool, String> {
+    use futures_util::{SinkExt, StreamExt};
+    use std::time::Duration;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let endpoint = endpoint.trim().to_string();
+    if endpoint.is_empty() {
+        return Err("服务器地址为空 | Endpoint is empty".to_string());
+    }
+
+    let connect_result = tokio::time::timeout(Duration::from_secs(3), tokio_tungstenite::connect_async(&endpoint))
+        .await
+        .map_err(|_| "连接超时 | Connect timeout".to_string())?;
+
+    let (ws, _) = connect_result.map_err(|err| err.to_string())?;
+    let (mut write, mut read) = ws.split();
+
+    let payload = serde_json::json!({ "type": "ping" }).to_string();
+    write
+        .send(Message::Text(payload))
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let incoming = tokio::time::timeout(Duration::from_secs(3), read.next())
+        .await
+        .map_err(|_| "等待响应超时 | Wait timeout".to_string())?;
+
+    let Some(incoming) = incoming else {
+        return Ok(false);
+    };
+    let Ok(incoming) = incoming else {
+        return Ok(false);
+    };
+
+    let Message::Text(text) = incoming else {
+        return Ok(false);
+    };
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(false);
+    };
+    Ok(value.get("type").and_then(|v| v.as_str()) == Some("pong"))
+}
+
+#[tauri::command]
+async fn test_llm_health(llm_config: llm::LlmConfig) -> Result<bool, String> {
+    let engine = llm::create_engine(&llm_config).map_err(|err| err.to_string())?;
+    Ok(engine.health_check().await)
+}
+
 fn main() {
     logging::init();
 
@@ -167,24 +275,27 @@ fn main() {
     );
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_client_config, save_client_config])
+        .invoke_handler(tauri::generate_handler![
+            load_client_config,
+            save_client_config,
+            get_runtime_info,
+            list_audio_devices,
+            check_permissions,
+            open_accessibility_settings,
+            open_microphone_settings,
+            open_sound_settings,
+            test_server_connection,
+            test_llm_health
+        ])
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            {
-                if !platform::ensure_accessibility(true) {
-                    tracing::warn!(
-                        target: "app",
-                        "macOS 未授予辅助功能权限：全局热键监听/键盘注入可能无效 | Accessibility permission missing on macOS"
-                    );
-                }
-            }
-
             let (config, config_path) = config::load_with_path();
-            let config::ClientConfig {
-                server_endpoints,
-                use_cloud_api,
-                hotkey,
-            } = config;
+            let hotkey = config.hotkey.clone();
+            let audio_device = config.audio_device.clone();
+
+            let server_endpoints = match &config.asr {
+                asr::AsrConfig::WebSocket { endpoint } => vec![endpoint.clone()],
+                _ => vec![asr::default_websocket_endpoint()],
+            };
             let config_path = config_path
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
@@ -205,6 +316,10 @@ fn main() {
                 path = config_path.as_str(),
                 hotkey = %hotkey,
                 server = %server_endpoints.get(0).map(String::as_str).unwrap_or(""),
+                audio_device = audio_device.as_deref().unwrap_or("(default)"),
+                use_cloud_api = config.use_cloud_api,
+                asr = %format!("{:?}", config.asr),
+                llm = %format!("{:?}", config.llm),
                 "配置已加载 | Config loaded"
             );
             setup_tray(app)?;
@@ -212,9 +327,17 @@ fn main() {
             tray.set_idle();
 
             let injector = input::spawn_injector();
-            let network = network::spawn_network(server_endpoints, injector, tray.clone());
+            let pipeline = pipeline::Pipeline::new(&config.asr, &config.llm, injector.clone()).unwrap_or_else(|err| {
+                tracing::error!(
+                    target: "pipeline",
+                    error = %err,
+                    "Pipeline 初始化失败，回退默认配置 | Pipeline init failed, falling back to defaults"
+                );
+                pipeline::Pipeline::new(&asr::AsrConfig::default(), &llm::LlmConfig::default(), injector.clone())
+                    .expect("pipeline fallback")
+            });
 
-            let state = Arc::new(app_state::AppState::new(network, use_cloud_api));
+            let state = Arc::new(app_state::AppState::new(pipeline, audio_device.clone()));
 
             let (hk_tx, mut hk_rx) = mpsc::channel::<HotkeyEvent>(32);
             spawn_hotkey_listener(hk_tx, hotkey);
@@ -236,6 +359,21 @@ fn main() {
 
             app.manage(state);
             info!(target: "tray", "托盘已就绪 | Tray ready");
+
+            // 如果权限缺失，自动弹出窗口提示（否则托盘模式下用户可能不知道）。
+            let accessibility_ok = if cfg!(target_os = "macos") {
+                platform::ensure_accessibility(false)
+            } else {
+                true
+            };
+            let microphone_ok = audio::check_microphone_access(audio_device.as_deref());
+            if !accessibility_ok || !microphone_ok {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -360,8 +498,8 @@ async fn handle_start(state: &Arc<app_state::AppState>, tray: &Arc<TrayControlle
 
     let trace_id = generate_trace_id();
     let context = get_active_context().unwrap_or_default();
-    let recorder = match audio::start_audio(state.tx.clone(), trace_id.clone()) {
-        Ok(recorder) => recorder,
+    let (recorder, mut pcm_rx) = match audio::start_audio(trace_id.clone(), state.audio_device.clone()) {
+        Ok(parts) => parts,
         Err(err) => {
             error!(
                 target: "audio",
@@ -374,6 +512,24 @@ async fn handle_start(state: &Arc<app_state::AppState>, tray: &Arc<TrayControlle
     };
 
     let sample_rate = recorder.sample_rate;
+    let session_gen = {
+        let mut pipeline = state.pipeline.lock().await;
+        match pipeline.start(trace_id.clone(), sample_rate, context).await {
+            Ok(gen) => gen,
+            Err(err) => {
+                error!(
+                    target: "pipeline",
+                    trace_id = trace_id.as_str(),
+                    error = %err,
+                    "ASR 会话启动失败 | ASR session start failed"
+                );
+                recorder.stop();
+                tray.set_error();
+                return;
+            }
+        }
+    };
+
     {
         let mut guard = state.audio.lock().expect("audio lock");
         if guard.is_some() {
@@ -387,15 +543,23 @@ async fn handle_start(state: &Arc<app_state::AppState>, tray: &Arc<TrayControlle
 
     tray.set_recording();
 
-    let _ = state
-        .tx
-        .send(NetworkCommand::SendControl(ClientControl::Start {
-            trace_id,
-            sample_rate,
-            context,
-            use_cloud_api: state.use_cloud_api,
-        }))
-        .await;
+    *state.session_gen.lock().expect("session gen lock") = Some(session_gen);
+
+    let state_for_task = state.clone();
+    let task = tauri::async_runtime::spawn(async move {
+        while let Some(frame) = pcm_rx.recv().await {
+            let mut pipeline = state_for_task.pipeline.lock().await;
+            if let Err(err) = pipeline.feed_audio(&frame).await {
+                tracing::warn!(
+                    target: "audio",
+                    error = %err,
+                    "ASR 音频发送失败 | ASR feed_audio failed"
+                );
+                break;
+            }
+        }
+    });
+    *state.audio_task.lock().expect("audio task lock") = Some(task);
 }
 
 async fn handle_stop(state: &Arc<app_state::AppState>, tray: &Arc<TrayController>) {
@@ -405,17 +569,30 @@ async fn handle_stop(state: &Arc<app_state::AppState>, tray: &Arc<TrayController
         return;
     };
 
-    let trace_id = recorder.trace_id.clone();
+    let task = state.audio_task.lock().expect("audio task lock").take();
+    let session_gen = state.session_gen.lock().expect("session gen lock").take().unwrap_or(0);
+
     recorder.stop();
 
     tray.set_processing();
 
-    let _ = state
-        .tx
-        .send(NetworkCommand::SendControl(ClientControl::Stop {
-            trace_id: Some(trace_id),
-        }))
-        .await;
+    if let Some(task) = task {
+        let _ = task.await;
+    }
+
+    let mut pipeline = state.pipeline.lock().await;
+    let stop_result = pipeline.stop(session_gen).await;
+    match stop_result {
+        Ok(()) => tray.set_idle(),
+        Err(err) => {
+            error!(
+                target: "pipeline",
+                error = %err,
+                "会话处理失败 | Session failed"
+            );
+            tray.set_error();
+        }
+    }
 }
 
 fn generate_trace_id() -> String {
@@ -428,7 +605,7 @@ fn generate_trace_id() -> String {
         .map(|d| d.as_micros() as u64)
         .unwrap_or(0);
 
-    let mut n = micros as u32;
+    let mut n = micros;
     let mut out = [b'0'; 6];
     for slot in out.iter_mut().rev() {
         *slot = BASE62[(n % 62) as usize];
@@ -438,14 +615,14 @@ fn generate_trace_id() -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
-fn get_active_context() -> Option<ClientContext> {
+fn get_active_context() -> Option<asr::AsrContext> {
     let ActiveWindow {
         app_name,
         title,
         ..
     } = active_win_pos_rs::get_active_window().ok()?;
 
-    Some(ClientContext {
+    Some(asr::AsrContext {
         app_name,
         window_title: title,
     })
